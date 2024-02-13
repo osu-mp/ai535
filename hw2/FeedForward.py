@@ -78,10 +78,14 @@ class LinearLayer:
         self.grad_weights = None
         self.grad_bias = None
 
+        # momentum related
+        self.velocity_weights = np.zeros_like(self.weights)
+        self.velocity_bias = np.zeros_like(self.bias)
+
     # TODO: During the forward pass, we simply compute XW+b
     def forward(self, input):
         self.input = input
-        self.output = np.dot(self.weights, input) + self.bias
+        self.output = np.dot(input, self.weights) + self.bias
         return self.output
 
     # TODO: Backward pass inputs:
@@ -90,33 +94,52 @@ class LinearLayer:
     #         the i'th row is the gradient of the loss of example i with respect
     #         to z_i (the output of this layer for example i)
 
-    # Computes and stores:
-    #
-    # self.grad_weights dL/dW --  A (input_dim x output_dim) matrix storing the gradient
-    #                       of the loss with respect to the weights of this layer.
-    #                       This is an summation over the gradient of the loss of
-    #                       each example with respect to the weights.
-    #
-    # self.grad_bias dL/dZ--     A (1 x output_dim) matrix storing the gradient
-    #                       of the loss with respect to the bias of this layer.
-    #                       This is an summation over the gradient of the loss of
-    #                       each example with respect to the bias.
+    def backward(self, labels):
+        n = len(labels)
+        # self.grad_weights dL/dW --  A (input_dim x output_dim) matrix storing the gradient
+        #                       of the loss with respect to the weights of this layer.
+        #                       This is an summation over the gradient of the loss of
+        #                       each example with respect to the weights.
+        #
+        self.grad_weights = np.dot(self.input.T, labels)
+        assert self.grad_weights.shape == (self.input_dim, self.output_dim)
 
-    # Return Value:
-    #
-    # grad_input dL/dX -- For a batch size of n, grad_input is a (n x input_dim) matrix where
-    #               the i'th row is the gradient of the loss of example i with respect
-    #               to x_i (the input of this layer for example i)
+        # self.grad_bias dL/dZ--     A (1 x output_dim) matrix storing the gradient
+        #                       of the loss with respect to the bias of this layer.
+        #                       This is an summation over the gradient of the loss of
+        #                       each example with respect to the bias.
+        self.grad_bias = np.sum(labels, axis=0, keepdims=True)
+        assert self.grad_bias.shape == (1, self.output_dim)
 
-    def backward(self, grad):
-        raise Exception('Student error: You haven\'t implemented the backward pass for LinearLayer yet.')
+        # Return Value:
+        #
+        # grad_input dL/dX -- For a batch size of n, grad_input is a (n x input_dim) matrix where
+        #               the i'th row is the gradient of the loss of example i with respect
+        #               to x_i (the input of this layer for example i)
+        grad_input = np.dot(labels, self.weights.T)
+        assert (grad_input.shape == (n, self.input_dim))
+        # assert grad_input.shape == (self.input_dim)
+        return grad_input
 
     ######################################################
     # Q2 Implement SGD with Weight Decay
     ######################################################
     def step(self, step_size, momentum=0.8, weight_decay=0.0):
-        # TODO: Implement the step
-        raise Exception('Student error: You haven\'t implemented the step for LinearLayer yet.')
+        # update the weights
+        self.weights -= step_size * (self.grad_weights + weight_decay * self.weights)
+        self.bias -= step_size * self.grad_bias
+
+        # implement momentum
+        if momentum > 0.0:
+            self.velocity_weights = momentum * self.velocity_weights - step_size * (self.grad_weights + weight_decay * self.weights)
+            self.velocity_bias = momentum * self.velocity_bias - step_size * self.grad_bias
+
+            self.weights += self.velocity_weights
+            self.bias += self.velocity_bias
+
+        # Clear gradients for next iteration
+        self.grad_weights = None
+        self.grad_bias = None
 
 
 ######################################################
@@ -154,6 +177,50 @@ def create_mini_batches(inputs, labels, batch_size):
 
     return batches
 
+def normalize_data(train_data, test_data):
+    # convert to float first
+    train_data = train_data.astype(float)
+    test_data = test_data.astype(float)
+
+    # compute mean and stdev on training data
+    mean = np.mean(train_data, axis=0)
+    stdev = np.std(train_data, axis=0)
+
+    # normalize the data around 0 with stdev of 1 (use train mean/std for both)
+    norm_train_data = (train_data - mean) / stdev
+    norm_test_data = (test_data - mean) / stdev
+
+    return norm_train_data, norm_test_data
+
+
+def binary_cross_entropy_loss(predictions, labels):
+    # Ensure numerical stability by clipping predictions to avoid log(0)
+    predictions = np.clip(predictions, 1e-7, 1 - 1e-7)
+
+    # Compute binary cross-entropy loss
+    loss = - (labels * np.log(predictions) + (1 - labels) * np.log(1 - predictions))
+
+    # Take the mean across the batch
+    mean_loss = np.mean(loss)
+
+    return mean_loss
+
+
+def compute_loss_gradients(predictions, labels):
+    # Compute gradients of binary cross-entropy loss with respect to predictions
+
+    # Number of examples in the batch
+    num_examples = predictions.shape[0]
+
+    # Compute gradients for each example
+    grad_loss = predictions - labels
+
+    # Normalize gradients by the number of examples in the batch
+    grad_loss /= num_examples
+
+    return grad_loss
+
+
 def main():
     # TODO: Set optimization parameters (NEED TO SUPPLY THESE)
     batch_size = 256  # TODO: lower? 32, 64
@@ -172,6 +239,9 @@ def main():
     Y_train = data['train_labels']
     X_test = data['test_data']
     Y_test = data['test_labels']
+
+
+    X_train, X_test = normalize_data(X_train, X_test)
 
     # Some helpful dimensions
     num_examples, input_dim = X_train.shape
@@ -192,23 +262,28 @@ def main():
         print(f"Training loop #{i + 1}")
         batches = create_mini_batches(X_train, Y_train, batch_size)
         for inputs, labels in batches:
+            # Compute forward pass
             predictions = net.forward(inputs)
-            print(f"{predictions=}")
-            print(f"     {labels=}")
-            return
-        # Compute forward pass
+            # print(f"{predictions=}")
+            # print(f"     {labels=}")
 
-        # Compute loss
+            # Compute loss
+            loss = binary_cross_entropy_loss(predictions, labels)
 
-        # Backward loss and networks
+            # Compute gradients of loss with respect to predictions
+            grad_loss = compute_loss_gradients(predictions, labels)
 
-        # Take optimizer step
+            # Backward loss and networks
+            gradients = net.backward(grad_loss)
 
-        # Book-keeping for loss / accuracy
+            # Take optimizer step
+            net.step(step_size, momentum, weight_decay)
 
-        # Evaluate performance on test.
-        _, tacc = evaluate(net, X_test, Y_test, batch_size)
-        print(tacc)
+            # Book-keeping for loss / accuracy
+
+            # Evaluate performance on test.
+        # _, tacc = evaluate(net, X_test, Y_test, batch_size)
+        # print(tacc)
 
         ###############################################################
         # Print some stats about the optimization process after each epoch
