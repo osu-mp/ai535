@@ -1,3 +1,5 @@
+import os.path
+
 import matplotlib.pyplot as plt
 from multiprocessing import Pool, cpu_count
 import numpy as np
@@ -10,10 +12,11 @@ DEBUG = False
 # match in a given cell (or both equal 0):
 #   DYNAMIC_COIN_FLIP = False: flip a coin once and use this label (pos or negative) against all test examples
 #   DYNAMIC_COIN_FLIP = True: flip a coin for each training example
-DYNAMIC_COIN_FLIP = True
+DYNAMIC_COIN_FLIP = False
 
 mat_contents = loadmat('hw2_data.mat')
-results_pkl = f'results_dynamic_{DYNAMIC_COIN_FLIP}.pickle'
+results_pkl = f'results_dynamic_{DYNAMIC_COIN_FLIP}.pkl'
+buckets_pkl = 'buckets.pkl'
 
 X_train = mat_contents['X_train']
 Y_train = mat_contents['y_train'][0]
@@ -82,7 +85,7 @@ def build_classifier(points, labels, m):
 	return classifier
 
 
-def compute_empirical_risk(classifier, test_points, test_labels, m):
+def compute_empirical_risk(classifier, test_bucket, m):
 	"""
 	Calculate empirical risk of the classifier by running all test points through it
 	The risk is calculated as the number of incorrectly classified test points
@@ -93,6 +96,29 @@ def compute_empirical_risk(classifier, test_points, test_labels, m):
 	:param m:
 	:return:
 	"""
+	miss_count = 0
+	total_points = 0
+
+	for i in range(m):
+		for j in range(m):
+			neg_count = test_bucket[i, j, 0]
+			pos_count = test_bucket[i, j, 1]
+
+			total_points += neg_count + pos_count
+
+			predicted_label = classifier[i, j]
+			if predicted_label == 0:  # this will only be hit when DYNAMIC_COIN_FLIP is True
+				predicted_label = np.random.choice([1, -1])
+
+			if predicted_label == -1:
+				miss_count += pos_count
+			else:
+				miss_count += neg_count
+
+	empirical_risk = miss_count / total_points
+	return empirical_risk
+
+def compute_empirical_risk_old(classifier, test_points, test_labels, m):
 	counter = 0
 
 	for point, label in zip(test_points.T, test_labels):
@@ -112,11 +138,45 @@ def compute_empirical_risk(classifier, test_points, test_labels, m):
 	empirical_risk = counter / len(test_points[0])
 	return empirical_risk
 
+def build_test_buckets(points, labels):
+	"""
+	Do a one time build of the test points into the m x m cells
+	Count positive and negative labels in each m value
+	This will eliminate redundant calcuations for each classifier
+	:param points:
+	:param labels:
+	:return:
+	"""
+	if os.path.exists(buckets_pkl):
+		with open(buckets_pkl, 'rb') as file:
+			test_buckets = pickle.load(file)
+			print(f"{len(test_buckets)} Test Buckets Loaded From Pickle")
+			return test_buckets
+
+	test_buckets = {}
+	for m in m_values:
+		m_bucket = np.zeros((m, m, 2), dtype=int)  # i x j cells and pos/negative counts
+		for point, label in zip(points.T, labels):
+			x, y = point
+			i, j = get_i_j(x, y, m)
+			if label == -1:
+				m_bucket[i, j, 0] += 1          # increment negative count
+			else:
+				m_bucket[i, j, 1] += 1
+		test_buckets[m] = m_bucket
+		# print(f"{m=}\n{m_bucket=}")
+
+	print(f"{len(test_buckets)} Test Buckets Built")
+	# Save the results to a pickle file
+	with open(buckets_pkl, 'wb') as file:
+		pickle.dump(test_buckets, file)
+	return test_buckets
+
 def run_config(params):
 	# individual run: run num_trials Monte Carlo runs of:
 	#   build classifier using n training points
 	#   calculate empirical risk using test data (of each trial and avg across all runs)
-    m, n, X_train, Y_train, X_test, Y_test, num_trials = params
+    m, n, X_train, Y_train, test_buckets, num_trials = params
     all_risks = np.zeros(num_trials)
     for trial in range(num_trials):
 
@@ -125,7 +185,7 @@ def run_config(params):
         sampled_points = X_train[:, sampled_indices]
         sampled_labels = Y_train[sample_indices]
         classifier = build_classifier(sampled_points, sampled_labels, m)
-        emp_risk = compute_empirical_risk(classifier, X_test, Y_test, m)
+        emp_risk = compute_empirical_risk(classifier, test_buckets[m], m)
         all_risks[trial] = emp_risk
         if DEBUG:
             print(f"{m=}, {n=}, Trial {trial+1}, Empirical Risk: {emp_risk}")
@@ -165,7 +225,7 @@ def plot_results():
 	plt.title('Average Empirical Risk vs n Values')
 	plt.legend()
 	plt.grid(True)
-	plt.savefig("plot1.png", bbox_inches='tight')
+	plt.savefig(f"plot1_dynamic_{DYNAMIC_COIN_FLIP}.png", bbox_inches='tight')
 
 	# Plot 2: Scatter plot of empirical risk with trendlines
 	plt.figure()
@@ -202,12 +262,13 @@ def plot_results():
 	# Set the y-axis tick formatter to display numbers without scientific notation (does not work)
 	plt.gca().yaxis.set_major_formatter(plt.matplotlib.ticker.FuncFormatter(lambda x, _: '{:.2f}'.format(x)))
 
-	plt.savefig("plot2.png", bbox_inches='tight')
+	plt.savefig(f"plot2_dynamic_{DYNAMIC_COIN_FLIP}.png", bbox_inches='tight')
 
 
 def main():
 	if RUN_TRIALS:
-		params = [(m, n, X_train, Y_train, X_test, Y_test, num_trials) for m in m_values for n in n_values]
+		test_buckets = build_test_buckets(X_test, Y_test)
+		params = [(m, n, X_train, Y_train, test_buckets, num_trials) for m in m_values for n in n_values]
 
 		# each config is independent, so can run in a separate thread
 		# can plot once all are completed
