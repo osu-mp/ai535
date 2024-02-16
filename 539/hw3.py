@@ -12,7 +12,7 @@ DEBUG = False
 # match in a given cell (or both equal 0):
 #   DYNAMIC_COIN_FLIP = False: flip a coin once and use this label (pos or negative) against all test examples
 #   DYNAMIC_COIN_FLIP = True: flip a coin for each training example
-DYNAMIC_COIN_FLIP = False
+DYNAMIC_COIN_FLIP = True
 
 mat_contents = loadmat('hw2_data.mat')
 results_pkl = f'results_dynamic_{DYNAMIC_COIN_FLIP}.pkl'
@@ -49,7 +49,6 @@ def build_classifier(points, labels, m):
 	Using the test points/labels, build a plug-in classifier with a grid of m by m cells
 	Take the majority class in each cell and set that as the predicted value.
 	If the counts are equal (or zero), check the flip a coin to decide the class
-		TODO: add ability to flip coin later
 	:param points:
 	:param labels:
 	:param m:
@@ -91,8 +90,7 @@ def compute_empirical_risk(classifier, test_bucket, m):
 	The risk is calculated as the number of incorrectly classified test points
 	divided by the total number of test points.
 	:param classifier:
-	:param test_points:
-	:param test_labels:
+	:param test_bucket:
 	:param m:
 	:return:
 	"""
@@ -155,7 +153,7 @@ def build_test_buckets(points, labels):
 
 	test_buckets = {}
 	for m in m_values:
-		m_bucket = np.zeros((m, m, 2), dtype=int)  # i x j cells and pos/negative counts
+		m_bucket = np.zeros((m, m, 2), dtype=int)  # i x j cells and negative/positive counts
 		for point, label in zip(points.T, labels):
 			x, y = point
 			i, j = get_i_j(x, y, m)
