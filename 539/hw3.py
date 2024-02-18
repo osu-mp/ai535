@@ -247,9 +247,12 @@ def run_config(params):
     plt.figure()
     plt.imshow(average_probs, cmap='coolwarm', interpolation='nearest')
     plt.colorbar()
-    plt.title(f'Average Probability Heatmap with {m=}, {n=}')
-    plt.xlabel('X-axis')
-    plt.ylabel('Y-axis')
+    formatted_n = f"{n:.0e}".split('e')[1]
+    plt.title(f'Average Probability Heatmap with m={m}, n=$10^{formatted_n}$')
+    plt.xlabel('Feature X')
+    plt.ylabel('Feature Y')
+    plt.xticks([])
+    plt.yticks([])
     fname = os.path.join(plot_dir, f'average_m_{m}_n_{n}.png')
     plt.savefig(fname)
 
@@ -259,9 +262,12 @@ def run_config(params):
     average_classifier[average_classifier < 0] = -1
     plt.imshow(average_classifier, cmap='coolwarm', interpolation='nearest')
     plt.colorbar()
-    plt.title(f'Average Classifier with {m=}, {n=}')
-    plt.xlabel('X-axis')
-    plt.ylabel('Y-axis')
+    formatted_n = f"{n:.0e}".split('e')[1]
+    plt.title(f'Average Classifier with m={m}, n=$10^{formatted_n}$')
+    plt.xlabel('Feature X')
+    plt.ylabel('Feature Y')
+    plt.xticks([])
+    plt.yticks([])
     fname = os.path.join(plot_dir, f'classifier_m_{m}_n_{n}.png')
     plt.savefig(fname)
 
@@ -293,8 +299,8 @@ def plot_results():
 
     plt.xscale('log')
     plt.yscale('log')
-    plt.xlabel('n values')
-    plt.ylabel('Average Empirical Risk')
+    plt.xlabel('n values (log scale)')
+    plt.ylabel('Average Empirical Risk (log scale)')
     plt.title('Average Empirical Risk vs n Values')
     plt.legend()
     plt.grid(True)
@@ -352,7 +358,7 @@ def main():
         with Pool(processes=cpu_count() - 2) as pool:
             results = pool.map(run_config, params)
 
-        # Save the results to a pickle file 
+        # Save the results to a pickle file
         with open(results_pkl, 'wb') as file:
             pickle.dump(results, file)
 
