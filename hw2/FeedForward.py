@@ -9,6 +9,7 @@ import pickle
 import matplotlib.pyplot as plt
 import matplotlib
 
+
 font = {'weight': 'normal', 'size': 22}
 matplotlib.rc('font', **font)
 import logging
@@ -32,14 +33,34 @@ class SigmoidCrossEntropy:
     #
     # TODO: Output should be a positive scalar value equal to the average cross entropy loss after sigmoid
     def forward(self, logits, labels):
-        # TODO store forward pass for use in backward
-        raise Exception('Student error: You haven\'t implemented the forward pass for SigmoidCrossEntropy yet.')
+        self.logits = logits
+        sigmoid_logits = 1 / (1 + np.exp(-logits))
+
+        y_pred = np.clip(sigmoid_logits, 1e-15, 1 - 1e-15)
+
+        # Compute cross-entropy loss
+        loss = - (labels * np.log(y_pred) + (1 - labels) * np.log(1 - y_pred))
+
+        # Take the mean across the batch
+        self.output = np.mean(loss)
+
+        # error check
+        assert self.output >= 0, "output should be a positive scalar"
+        return self.output
+
 
     # TODO: Compute the gradient of the cross entropy loss with respect to the the input logits
     def backward(self):
         # TODO : use forward pass stored results
         # TODO result = sigmoid(x) * (1 - sigmoid)
-        raise Exception('Student error: You haven\'t implemented the backward pass for SigmoidCrossEntropy yet.')
+        # Compute gradient of loss with respect to the sigmoid logits
+        grad_loss_sigmoid = self.grad_cross_entropy_loss()
+
+        # Compute gradient of sigmoid logits with respect to the original logits
+        grad_sigmoid_logits = grad_loss_sigmoid * self.sigmoid_logits * (1 - self.sigmoid_logits)
+
+        assert grad_sigmoid_logits.shape == self.logits.shape, "Output shape of backward should match input shape"
+        return grad_sigmoid_logits
 
 
 class ReLU:
@@ -47,15 +68,17 @@ class ReLU:
     # TODO: Compute ReLU(input) element-wise
     def forward(self, input):
         self.input = input
-        raise Exception('Student error: You haven\'t implemented the forward pass for ReLU yet.')
+        return np.maximum(0, input)
 
     # TODO: Given dL/doutput, return dL/dinput
     def backward(self, grad):
-        raise Exception('Student error: You haven\'t implemented the backward pass for ReLU yet.')
+        grad_input = grad * (self.input > 0)
+        return grad_input
 
     # No parameters so nothing to do during a gradient descent step
     def step(self, step_size, momentum=0, weight_decay=0):
         # TODO : see slide 24 of L3.2
+        # TODO: check with Pat
         return
 
 
@@ -125,6 +148,9 @@ class LinearLayer:
     # Q2 Implement SGD with Weight Decay
     ######################################################
     def step(self, step_size, momentum=0.8, weight_decay=0.0):
+        assert self.grad_weights.shape == self.weights.shape
+        assert self.velocity_weights.shape == self.grad_weights.shape
+
         # update the weights
         self.weights -= step_size * (self.grad_weights + weight_decay * self.weights)
         self.bias -= step_size * self.grad_bias
@@ -148,7 +174,31 @@ class LinearLayer:
 
 # TODO: Given a model, X/Y dataset, and batch size, return the average cross-entropy loss and accuracy over the set
 def evaluate(model, X_val, Y_val, batch_size):
-    raise Exception('Student error: You haven\'t implemented the step for evaluate function.')
+    num_examples = X_val.shape[0]
+    total_loss = 0
+    correct_predictions = 0
+
+    # Create mini-batches
+    batches = create_mini_batches(X_val, Y_val, batch_size)
+
+    for inputs, labels in batches:
+        # Forward pass
+        predictions = model.forward(inputs)
+
+        # Compute loss
+        loss = binary_cross_entropy_loss(predictions, labels)
+        total_loss += loss * inputs.shape[0]  # Multiply by batch size to account for averaging later
+
+        # Compute accuracy
+        predicted_labels = np.argmax(predictions, axis=1)  # Assuming binary classification
+        true_labels = np.argmax(labels, axis=1)  # Assuming one-hot encoding
+        correct_predictions += np.sum(predicted_labels == true_labels)
+
+    # Compute average loss and accuracy
+    average_loss = total_loss / num_examples
+    accuracy = correct_predictions / num_examples
+
+    return average_loss, accuracy
 
 
 def create_mini_batches(inputs, labels, batch_size):
@@ -223,13 +273,14 @@ def compute_loss_gradients(predictions, labels):
 
 def main():
     # TODO: Set optimization parameters (NEED TO SUPPLY THESE)
-    batch_size = 256  # TODO: lower? 32, 64
-    max_epochs = 5 # 300  # TODO: lower? 50, 100
-    step_size = 0.1
+    batch_size = 64  # TODO: lower? 32, 64
+    max_epochs = 10 # 300  # TODO: lower? 50, 100
+    step_size = 0.01
 
-    number_of_layers = 1  # TODO : update
-    width_of_layers = 64
-    weight_decay = 0.001
+    width_of_layers = [256, 64]
+    number_of_layers = len(width_of_layers)
+
+    weight_decay = 0 # 0.01     # TODO:
     momentum = 0.8
 
 
@@ -241,11 +292,11 @@ def main():
     Y_test = data['test_labels']
 
 
-    X_train, X_test = normalize_data(X_train, X_test)
+    #X_train, X_test = normalize_data(X_train, X_test)
 
     # Some helpful dimensions
     num_examples, input_dim = X_train.shape
-    output_dim = 2  # number of class labels
+    output_dim = 1  # number of class labels
 
     # Build a network with input feature dimensions, output feature dimension,
     # hidden dimension, and number of layers as specified below. You can edit this as you please.
@@ -280,10 +331,17 @@ def main():
             net.step(step_size, momentum, weight_decay)
 
             # Book-keeping for loss / accuracy
+            losses.append(loss)
+
+        average_loss, accuracy = evaluate(net, inputs, labels, batch_size)
+        accs.append(accuracy)
+
 
             # Evaluate performance on test.
-        # _, tacc = evaluate(net, X_test, Y_test, batch_size)
-        # print(tacc)
+        val_loss, vacc = evaluate(net, X_test, Y_test, batch_size)
+        print(vacc)
+        val_accs.append(vacc)
+        val_losses.append(val_loss)
 
         ###############################################################
         # Print some stats about the optimization process after each epoch
@@ -292,8 +350,10 @@ def main():
         # epoch_avg_acc -- average accuracy across batches this epoch
         # vacc -- testing accuracy this epoch
         ###############################################################
+        epoch_avg_loss = average_loss # np.mean(losses)
+        epoch_avg_acc = np.mean(accs)
 
-        # logging.info("[Epoch {:3}]   Loss:  {:8.4}     Train Acc:  {:8.4}%      Val Acc:  {:8.4}%".format(i,epoch_avg_loss, epoch_avg_acc, vacc*100))
+        logging.info("[Epoch {:3}]   Loss:  {:8.4}     Train Acc:  {:8.4}%      Val Acc:  {:8.4}%".format(i,epoch_avg_loss, epoch_avg_acc, vacc*100))
 
     ###############################################################
     # Code for producing output plot requires
@@ -338,12 +398,33 @@ def main():
 
 class FeedForwardNeuralNetwork:
 
-    def __init__(self, input_dim, output_dim, hidden_dim, num_layers):
+    def __init__(self, input_dim, output_dim, hidden_dims, num_layers):
+        self.layers = [
+            LinearLayer(input_dim, hidden_dims[0]),
+            ReLU(),
+        ]
 
-        if num_layers == 1:
-            self.layers = [LinearLayer(input_dim, output_dim)]
-        else:
-            raise Exception("TODO")
+        for i in range(1, len(hidden_dims)):
+            self.layers.extend([
+                LinearLayer(hidden_dims[i - 1], hidden_dims[i]),
+                ReLU(),
+            ])
+
+        self.layers.append(LinearLayer(hidden_dims[-1], output_dim))
+
+        # TODO: ask Pat about sigmoid requiring labels (
+        # self.layers.append(
+        #     SigmoidCrossEntropy()
+        # )
+        #
+        # if num_layers == 1:
+        #     self.layers = [LinearLayer(input_dim, output_dim)]
+        # else:
+        #     self.layers = [
+        #         LinearLayer(input_dim, hidden_dim),
+        #         ReLU(hidden_dim, output_dim),
+        #         SigmoidCrossEntropy(output_dim, 1)
+        #     ]
         # TODO: Please create a network with hidden layers based on the parameters
 
     def forward(self, X):
