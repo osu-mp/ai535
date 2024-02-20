@@ -53,56 +53,6 @@ def get_i_j(x, y, m):
     return i, j
 
 
-def build_classifier_old(points, labels, m):
-    """
-    Using the test points/labels, build a plug-in classifier with a grid of m by m cells
-    Take the majority class in each cell and set that as the predicted value.
-    If the counts are equal (or zero), check the flip a coin to decide the class
-    :param points:
-    :param labels:
-    :param m:
-    :return:
-    """
-    if False:
-        return np.array([[1,-1,-1,-1],
-                [1,-1,-1,-1],
-                [1,1,-1,-1],
-                [1,1,1,-1]])
-    # first count the majority class in each cell
-    grid_counts = np.zeros((m, m), dtype=int)
-    grid_counts_pos = np.zeros((m, m), dtype=int)
-    grid_counts_neg = np.zeros((m, m), dtype=int)
-    for point, label in zip(points.T, labels):
-        x, y = point
-        i, j = get_i_j(x, y, m)
-        if label > 0:
-            grid_counts_pos[i, j] += 1		# positive label increments, negative label decrements by same amount
-        else:
-            grid_counts_neg[i, j] += 1
-        # grid_counts2[i, j] += 1
-
-    # use majority class to build the classifier
-    classifier = np.zeros((m, m), dtype=int)
-    for i in range(m):
-        for j in range(m):
-            count = grid_counts_pos[i, j] - grid_counts_neg[i, j]
-            # Assign the label based on counts
-            if count > 0:
-                classifier[i, j] = 1
-            elif count < 0:
-                classifier[i, j] = -1
-            else:
-                if DYNAMIC_COIN_FLIP:
-                    classifier[i, j] = 0        # test data will get a random class each time
-                else:
-                    classifier[i, j] = np.random.choice([1, -1])    # classifier is solidified for all test data
-
-    if DEBUG:
-        print(f"{grid_counts=}")
-        print(f"{classifier=}")
-
-    return classifier
-
 def build_classifier(points, labels, m):
     """
     Using the test points/labels, build a plug-in classifier with a grid of m by m cells

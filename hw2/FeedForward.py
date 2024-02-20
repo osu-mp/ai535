@@ -2,13 +2,13 @@
 Matthew Pacey
 AI 535 - HW2
 """
-
+import random
 from turtle import width
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 import matplotlib
-
+import torch.nn
 
 font = {'weight': 'normal', 'size': 22}
 matplotlib.rc('font', **font)
@@ -19,6 +19,10 @@ logging.basicConfig(
     level=logging.INFO,
     datefmt='%Y-%m-%d %H:%M:%S')
 
+
+batch_plot = "batches.png"
+learn_plot = "learning_rate.png"
+hidden_plot = "hidden_plot.png"
 
 ######################################################
 # Q1 Implement Init, Forward, and Backward For Layers
@@ -33,13 +37,21 @@ class SigmoidCrossEntropy:
     #
     # TODO: Output should be a positive scalar value equal to the average cross entropy loss after sigmoid
     def forward(self, logits, labels):
-        self.logits = logits
-        sigmoid_logits = 1 / (1 + np.exp(-logits))
+        # pat start
+        preds = self.sigmoid(logits)
+        output = self.bce
+        # pat end
 
-        y_pred = np.clip(sigmoid_logits, 1e-15, 1 - 1e-15)
+
+        self.logits = logits
+        self.labels = labels
+        self.y_pred = 1 / (1 + np.exp(-logits))
+        #
+
+        # y_pred = np.clip(probs, 1e-15, 1 - 1e-15)
 
         # Compute cross-entropy loss
-        loss = - (labels * np.log(y_pred) + (1 - labels) * np.log(1 - y_pred))
+        loss = - (labels * np.log(self.y_pred) + (1 - labels) * np.log(1 - self.y_pred))
 
         # Take the mean across the batch
         self.output = np.mean(loss)
@@ -54,31 +66,33 @@ class SigmoidCrossEntropy:
         # TODO : use forward pass stored results
         # TODO result = sigmoid(x) * (1 - sigmoid)
         # Compute gradient of loss with respect to the sigmoid logits
-        grad_loss_sigmoid = self.grad_cross_entropy_loss()
+        dx = self.y_pred - self.labels
+        return np.mean(dx)
+        # grad_loss_sigmoid = self.grad_cross_entropy_loss()
 
         # Compute gradient of sigmoid logits with respect to the original logits
-        grad_sigmoid_logits = grad_loss_sigmoid * self.sigmoid_logits * (1 - self.sigmoid_logits)
+        # grad_sigmoid_logits = grad_loss_sigmoid * self.sigmoid_logits * (1 - self.sigmoid_logits)
 
-        assert grad_sigmoid_logits.shape == self.logits.shape, "Output shape of backward should match input shape"
-        return grad_sigmoid_logits
+        # assert grad_sigmoid_logits.shape == self.logits.shape, "Output shape of backward should match input shape"
+        # return grad_sigmoid_logits
 
 
-class ReLU:
+class ReLU(torch.nn.Module):        # TODO: get rid of torch
 
     # TODO: Compute ReLU(input) element-wise
     def forward(self, input):
         self.input = input
+        self.deriv = np.where(input > 0, 1, 0)      # precompute deriv of i
         return np.maximum(0, input)
 
     # TODO: Given dL/doutput, return dL/dinput
     def backward(self, grad):
-        grad_input = grad * (self.input > 0)
+        # grad_input = grad * (self.input > 0)
+        grad_input = grad * self.deriv
         return grad_input
 
     # No parameters so nothing to do during a gradient descent step
     def step(self, step_size, momentum=0, weight_decay=0):
-        # TODO : see slide 24 of L3.2
-        # TODO: check with Pat
         return
 
 
@@ -91,15 +105,17 @@ class LinearLayer:
         self.output_dim = output_dim
         print(f"{self.input_dim=}, {self.output_dim=}")
 
-        # init weights with random values (input_dim, output_dim)
-        self.weights = np.random.randn(input_dim, output_dim)
+        k = 1 / input_dim
+        self.weights = np.random.uniform(-np.sqrt(k), np.sqrt(k), (input_dim, output_dim))
+        assert self.weights.shape == (input_dim, output_dim)
+
         # init bias vector (1, output_dim)
         self.bias = np.zeros((1, output_dim))
 
         # TODO:
-        self.grad_dl_dz = None
-        self.grad_weights = None
-        self.grad_bias = None
+        # self.grad_dl_dz = None
+        # self.grad_weights = None
+        # self.grad_bias = None
 
         # momentum related
         self.velocity_weights = np.zeros_like(self.weights)
@@ -132,6 +148,7 @@ class LinearLayer:
         #                       This is an summation over the gradient of the loss of
         #                       each example with respect to the bias.
         self.grad_bias = np.sum(labels, axis=0, keepdims=True)
+        # self.grad_bias =
         assert self.grad_bias.shape == (1, self.output_dim)
 
         # Return Value:
@@ -185,14 +202,16 @@ def evaluate(model, X_val, Y_val, batch_size):
         # Forward pass
         predictions = model.forward(inputs)
 
+
         # Compute loss
         loss = binary_cross_entropy_loss(predictions, labels)
         total_loss += loss * inputs.shape[0]  # Multiply by batch size to account for averaging later
 
         # Compute accuracy
         predicted_labels = np.argmax(predictions, axis=1)  # Assuming binary classification
+        predicted_labels = (predictions > 0.5).astype(np.int8)
         true_labels = np.argmax(labels, axis=1)  # Assuming one-hot encoding
-        correct_predictions += np.sum(predicted_labels == true_labels)
+        correct_predictions += np.sum(predicted_labels == labels)
 
     # Compute average loss and accuracy
     average_loss = total_loss / num_examples
@@ -292,7 +311,7 @@ def main():
     Y_test = data['test_labels']
 
 
-    #X_train, X_test = normalize_data(X_train, X_test)
+    X_train, X_test = normalize_data(X_train, X_test)
 
     # Some helpful dimensions
     num_examples, input_dim = X_train.shape
@@ -353,7 +372,7 @@ def main():
         epoch_avg_loss = average_loss # np.mean(losses)
         epoch_avg_acc = np.mean(accs)
 
-        logging.info("[Epoch {:3}]   Loss:  {:8.4}     Train Acc:  {:8.4}%      Val Acc:  {:8.4}%".format(i,epoch_avg_loss, epoch_avg_acc, vacc*100))
+        logging.info("[Epoch {:3}]   Loss:  {:8.4}     Train Acc:  {:8.4}%      Val Acc:  {:8.4}%".format(i,epoch_avg_loss, epoch_avg_acc*100, vacc*100))
 
     ###############################################################
     # Code for producing output plot requires
@@ -391,6 +410,60 @@ def main():
     plt.show()
 
 
+# Define a function to run a single test
+def run_test(batch_size, learning_rate, hidden_units):
+    # Run your test and return test accuracy
+    test_accuracy = random.random()
+    return test_accuracy
+
+
+# Define a function to run tests with different batch sizes and generate plot
+def plot_batch_sizes(batch_sizes, learning_rate, hidden_units):
+    results = []
+    for batch_size in batch_sizes:
+        test_accuracy = run_test(batch_size, learning_rate, hidden_units)
+        results.append((batch_size, test_accuracy))
+
+    title = f'Test Accuracy vs. Batch Size (LR: {learning_rate}, Hidden Units: {hidden_units})'
+    xlabel = 'Batch Size'
+    plot_results(results, title, xlabel, fname=batch_plot)
+
+
+# Define a function to run tests with different learning rates and generate plot
+def plot_learning_rates(batch_size, learning_rates, hidden_units):
+    results = []
+    for lr in learning_rates:
+        test_accuracy = run_test(batch_size, lr, hidden_units)
+        results.append((lr, test_accuracy))
+
+    title = f'Test Accuracy vs. Learning Rate (Batch Size: {batch_size}, Hidden Units: {hidden_units})'
+    xlabel = 'Learning Rate'
+    plot_results(results, title, xlabel, fname=learn_plot)
+
+
+def plot_hidden_units(batch_size, learning_rate, hidden_units):
+    results = []
+    for units in hidden_units:
+        test_accuracy = run_test(batch_size, learning_rate, hidden_units)
+        results.append((units, test_accuracy))
+
+    title = f'Test Accuracy vs. Hidden Units (Batch Size: {batch_size}, Learning Rate: {learning_rate})'
+    xlabel = 'Number of Hidden Units'
+    plot_results(results, title, xlabel, fname=hidden_plot)
+
+def plot_results(results, title, xlabel, fname):
+    # Plot the results
+    plt.figure(figsize=(8, 6))  # Adjust figure size as needed
+    plt.plot(*zip(*results), marker='o')
+
+    plt.ylabel('Test Accuracy (%)')
+    plt.title(title)
+    plt.grid(True)
+    plt.tight_layout()  # Adjust padding around the plot
+    plt.savefig(fname)
+    print(f"Generated {fname}")
+
+
 #####################################################
 # Feedforward Neural Network Structure
 # -- Feel free to edit when tuning
@@ -413,6 +486,8 @@ class FeedForwardNeuralNetwork:
         self.layers.append(LinearLayer(hidden_dims[-1], output_dim))
 
         # TODO: ask Pat about sigmoid requiring labels (
+        # layers produce logits (any number), sigmoid reduces those to probs [0,1)
+
         # self.layers.append(
         #     SigmoidCrossEntropy()
         # )
@@ -453,3 +528,23 @@ def displayExample(x):
 
 if __name__ == "__main__":
     main()
+    if True:
+        exit(1)
+
+    # Define batch sizes, learning rates, and number of hidden units
+    batch_sizes = [16, 32, 64]
+    learning_rates = [0.001, 0.01, 0.1]
+    hidden_units = 128
+
+    # Plot test accuracy vs. batch sizes
+    plot_batch_sizes(batch_sizes, learning_rate=0.01, hidden_units=128)
+
+    # Plot test accuracy vs. learning rates
+    batch_size = 32  # Choose a fixed batch size
+    plot_learning_rates(batch_size, learning_rates, hidden_units)
+
+    # Plot test accuracy vs. learning rates
+    batch_size = 32  # Choose a fixed batch size
+    learning_rate = 0.01
+    hidden_units = [64, 128, 256, 1024]
+    plot_hidden_units(batch_size, learning_rate, hidden_units)
