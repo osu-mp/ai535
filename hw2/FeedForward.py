@@ -14,6 +14,8 @@ font = {'weight': 'normal', 'size': 22}
 matplotlib.rc('font', **font)
 import logging
 
+omit_single_plot = True
+
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
     level=logging.INFO,
@@ -290,17 +292,19 @@ def compute_loss_gradients(predictions, labels):
     return grad_loss
 
 
-def main():
+def main(batch_size, step_size, hidden_units):
     # TODO: Set optimization parameters (NEED TO SUPPLY THESE)
     batch_size = 64  # TODO: lower? 32, 64
-    max_epochs = 10 # 300  # TODO: lower? 50, 100
+    max_epochs = 20 # 300  # TODO: lower? 50, 100
     step_size = 0.01
 
-    width_of_layers = [256, 64]
-    number_of_layers = len(width_of_layers)
+    width_of_layers = hidden_units # [256, 64]
+    number_of_layers = len(hidden_units)
 
-    weight_decay = 0 # 0.01     # TODO:
+    weight_decay = 0.01     # TODO:
     momentum = 0.8
+
+    print(f"RUN TEST {batch_size=}, {step_size=}, {hidden_units=}")
 
 
     # Load data
@@ -331,6 +335,7 @@ def main():
     for i in range(max_epochs):
         print(f"Training loop #{i + 1}")
         batches = create_mini_batches(X_train, Y_train, batch_size)
+        train_losses = []
         for inputs, labels in batches:
             # Compute forward pass
             predictions = net.forward(inputs)
@@ -350,17 +355,20 @@ def main():
             net.step(step_size, momentum, weight_decay)
 
             # Book-keeping for loss / accuracy
-            losses.append(loss)
+            # losses.append(loss)
+            train_losses.append(loss)
 
         average_loss, accuracy = evaluate(net, inputs, labels, batch_size)
+        losses.append(average_loss)
         accs.append(accuracy)
 
 
             # Evaluate performance on test.
         val_loss, vacc = evaluate(net, X_test, Y_test, batch_size)
-        print(vacc)
+        # print(vacc)
         val_accs.append(vacc)
         val_losses.append(val_loss)
+
 
         ###############################################################
         # Print some stats about the optimization process after each epoch
@@ -371,7 +379,7 @@ def main():
         ###############################################################
         epoch_avg_loss = average_loss # np.mean(losses)
         epoch_avg_acc = np.mean(accs)
-
+        # losses.append(epoch_avg_loss)
         logging.info("[Epoch {:3}]   Loss:  {:8.4}     Train Acc:  {:8.4}%      Val Acc:  {:8.4}%".format(i,epoch_avg_loss, epoch_avg_acc*100, vacc*100))
 
     ###############################################################
@@ -384,6 +392,8 @@ def main():
     # batch_size -- the batch size
     ################################################################
 
+    if omit_single_plot:
+        return val_accs[-1]
     # Plot training and testing curves
     fig, ax1 = plt.subplots(figsize=(16, 9))
     color = 'tab:red'
@@ -412,16 +422,14 @@ def main():
 
 # Define a function to run a single test
 def run_test(batch_size, learning_rate, hidden_units):
-    # Run your test and return test accuracy
-    test_accuracy = random.random()
-    return test_accuracy
-
+    # run the given config
+    return main(batch_size, learning_rate, hidden_units)
 
 # Define a function to run tests with different batch sizes and generate plot
 def plot_batch_sizes(batch_sizes, learning_rate, hidden_units):
     results = []
     for batch_size in batch_sizes:
-        test_accuracy = run_test(batch_size, learning_rate, hidden_units)
+        test_accuracy = run_test(batch_size, learning_rate, hidden_units) * 100
         results.append((batch_size, test_accuracy))
 
     title = f'Test Accuracy vs. Batch Size (LR: {learning_rate}, Hidden Units: {hidden_units})'
@@ -433,7 +441,7 @@ def plot_batch_sizes(batch_sizes, learning_rate, hidden_units):
 def plot_learning_rates(batch_size, learning_rates, hidden_units):
     results = []
     for lr in learning_rates:
-        test_accuracy = run_test(batch_size, lr, hidden_units)
+        test_accuracy = run_test(batch_size, lr, hidden_units) * 100
         results.append((lr, test_accuracy))
 
     title = f'Test Accuracy vs. Learning Rate (Batch Size: {batch_size}, Hidden Units: {hidden_units})'
@@ -441,26 +449,49 @@ def plot_learning_rates(batch_size, learning_rates, hidden_units):
     plot_results(results, title, xlabel, fname=learn_plot)
 
 
-def plot_hidden_units(batch_size, learning_rate, hidden_units):
+def plot_hidden_units(batch_size, learning_rate, unit_cfgs):
     results = []
-    for units in hidden_units:
-        test_accuracy = run_test(batch_size, learning_rate, hidden_units)
-        results.append((units, test_accuracy))
+    for units in unit_cfgs[0]:
+        test_accuracy = run_test(batch_size, learning_rate, units) * 100
+        unit_str = ", ".join(str(i) for i in units)
+        results.append((unit_str, test_accuracy))
 
     title = f'Test Accuracy vs. Hidden Units (Batch Size: {batch_size}, Learning Rate: {learning_rate})'
     xlabel = 'Number of Hidden Units'
-    plot_results(results, title, xlabel, fname=hidden_plot)
+    plot_results(results, title, xlabel, fname=hidden_plot, font_size=10)
 
-def plot_results(results, title, xlabel, fname):
+def plot_results(results, title, xlabel, fname, font_size=None):
     # Plot the results
-    plt.figure(figsize=(8, 6))  # Adjust figure size as needed
-    plt.plot(*zip(*results), marker='o')
+    plt.figure(figsize=(10, 6))  # Adjust figure size as needed
+    # Extract x and y values from results
+    x_values, y_values = zip(*results)
+
+    # Plot data points with specified x values
+    plt.plot(x_values, y_values, marker='o')
 
     plt.ylabel('Test Accuracy (%)')
-    plt.title(title)
+    plt.xlabel(xlabel)
+    plt.title(title, fontsize=16)
     plt.grid(True)
-    plt.tight_layout()  # Adjust padding around the plot
+    plt.tight_layout()  # Adjust padding around the plot    # Rotate x-axis labels at 45 degrees
+    # Adjust bottom margin
+    # Set ticks equidistantly
+    if font_size:
+        num_ticks = len(x_values)
+        plt.subplots_adjust(bottom=0.3)  # Increase bottom margin to 20%
+        plt.xticks(rotation=-90)
+        plt.xticks(range(num_ticks), x_values, fontsize=font_size)
+    # else:
+    #     plt.xticks(range(num_ticks), x_values)
+    # Custom tick labels
+    # custom_tick_labels = ['128', '64', '128, 64', '256, 128, 64', '512, 256, 128, 64']
+
+    # Set ticks equidistantly with custom tick labels
+    # num_ticks = len(custom_tick_labels)
+    # plt.xticks(range(num_ticks), custom_tick_labels)
+
     plt.savefig(fname)
+    # plt.show()
     print(f"Generated {fname}")
 
 
@@ -527,24 +558,31 @@ def displayExample(x):
 
 
 if __name__ == "__main__":
-    main()
-    if True:
-        exit(1)
+    # main()
+    # if True:
+    #     exit(1)
 
     # Define batch sizes, learning rates, and number of hidden units
-    batch_sizes = [16, 32, 64]
+    best_batch = 64
+    best_lr = 0.1
+    best_hidden_units = [256, 128, 64]
+
+
+    batch_sizes = [16, 32, 64, 128, 256, 512]
     learning_rates = [0.001, 0.01, 0.1]
-    hidden_units = 128
 
     # Plot test accuracy vs. batch sizes
-    plot_batch_sizes(batch_sizes, learning_rate=0.01, hidden_units=128)
+    plot_batch_sizes(batch_sizes, best_lr, best_hidden_units)
 
     # Plot test accuracy vs. learning rates
-    batch_size = 32  # Choose a fixed batch size
-    plot_learning_rates(batch_size, learning_rates, hidden_units)
+    plot_learning_rates(best_batch, learning_rates, best_hidden_units)
 
     # Plot test accuracy vs. learning rates
-    batch_size = 32  # Choose a fixed batch size
-    learning_rate = 0.01
-    hidden_units = [64, 128, 256, 1024]
-    plot_hidden_units(batch_size, learning_rate, hidden_units)
+    hidden_units_cfgs = [
+        [128],
+        [64],
+        [128, 64],
+        [256, 128, 64],
+        [512, 256, 128, 64],
+        ],
+    plot_hidden_units(best_batch, best_lr, hidden_units_cfgs)
