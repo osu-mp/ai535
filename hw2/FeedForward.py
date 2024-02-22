@@ -1,20 +1,18 @@
 """
 Matthew Pacey
 AI 535 - HW2
+Neural Nets and Backpropagation
 """
-import random
-from turtle import width
 import numpy as np
 import pickle
 import matplotlib.pyplot as plt
 import matplotlib
-import torch.nn
+import multiprocessing
 
 font = {'weight': 'normal', 'size': 22}
 matplotlib.rc('font', **font)
 import logging
 
-omit_single_plot = True
 
 logging.basicConfig(
     format='%(asctime)s %(levelname)-8s %(message)s',
@@ -25,6 +23,10 @@ logging.basicConfig(
 batch_plot = "batches.png"
 learn_plot = "learning_rate.png"
 hidden_plot = "hidden_plot.png"
+NUM_TRIALS = 10                     # run this many trials per config and take average test accuracy
+OMIT_SINGLE_PLOT = True             # for each config, just return highest test acc, do not plot individual run
+RUN_PARALLEL = True                 # run trials of batch size, learning rates, and hidden unit configs in parallel
+DEBUG = False                       # turn on to display debug prints
 
 ######################################################
 # Q1 Implement Init, Forward, and Backward For Layers
@@ -36,21 +38,10 @@ class SigmoidCrossEntropy:
     # Compute the cross entropy loss after sigmoid. The reason they are put into the same layer is because the gradient has a simpler form
     # logits -- batch_size x num_classes set of scores, logits[i,j] is score of class j for batch element i
     # labels -- batch_size x 1 vector of integer label id (0,1,2) where labels[i] is the label for batch element i
-    #
-    # TODO: Output should be a positive scalar value equal to the average cross entropy loss after sigmoid
+    # Output should be a positive scalar value equal to the average cross entropy loss after sigmoid
     def forward(self, logits, labels):
-        # pat start
-        preds = self.sigmoid(logits)
-        output = self.bce
-        # pat end
-
-
-        self.logits = logits
         self.labels = labels
         self.y_pred = 1 / (1 + np.exp(-logits))
-        #
-
-        # y_pred = np.clip(probs, 1e-15, 1 - 1e-15)
 
         # Compute cross-entropy loss
         loss = - (labels * np.log(self.y_pred) + (1 - labels) * np.log(1 - self.y_pred))
@@ -63,33 +54,24 @@ class SigmoidCrossEntropy:
         return self.output
 
 
-    # TODO: Compute the gradient of the cross entropy loss with respect to the the input logits
+    # Compute the gradient of the cross entropy loss with respect to the the input logits
     def backward(self):
-        # TODO : use forward pass stored results
-        # TODO result = sigmoid(x) * (1 - sigmoid)
+        # use forward pass stored results
         # Compute gradient of loss with respect to the sigmoid logits
         dx = self.y_pred - self.labels
         return np.mean(dx)
-        # grad_loss_sigmoid = self.grad_cross_entropy_loss()
-
-        # Compute gradient of sigmoid logits with respect to the original logits
-        # grad_sigmoid_logits = grad_loss_sigmoid * self.sigmoid_logits * (1 - self.sigmoid_logits)
-
-        # assert grad_sigmoid_logits.shape == self.logits.shape, "Output shape of backward should match input shape"
-        # return grad_sigmoid_logits
 
 
-class ReLU(torch.nn.Module):        # TODO: get rid of torch
+class ReLU():
 
-    # TODO: Compute ReLU(input) element-wise
+    # Compute ReLU(input) element-wise
     def forward(self, input):
         self.input = input
         self.deriv = np.where(input > 0, 1, 0)      # precompute deriv of i
         return np.maximum(0, input)
 
-    # TODO: Given dL/doutput, return dL/dinput
+    # Given dL/doutput, return dL/dinput
     def backward(self, grad):
-        # grad_input = grad * (self.input > 0)
         grad_input = grad * self.deriv
         return grad_input
 
@@ -100,13 +82,13 @@ class ReLU(torch.nn.Module):        # TODO: get rid of torch
 
 class LinearLayer:
 
-    # TODO: Initialize our layer with (input_dim, output_dim) weight matrix and a (1,output_dim) bias vector
+    # Initialize our layer with (input_dim, output_dim) weight matrix and a (1,output_dim) bias vector
     def __init__(self, input_dim, output_dim):
         # save dimensions
         self.input_dim = input_dim
         self.output_dim = output_dim
-        print(f"{self.input_dim=}, {self.output_dim=}")
 
+        # randomize weights between +/- sqrt k
         k = 1 / input_dim
         self.weights = np.random.uniform(-np.sqrt(k), np.sqrt(k), (input_dim, output_dim))
         assert self.weights.shape == (input_dim, output_dim)
@@ -114,34 +96,26 @@ class LinearLayer:
         # init bias vector (1, output_dim)
         self.bias = np.zeros((1, output_dim))
 
-        # TODO:
-        # self.grad_dl_dz = None
-        # self.grad_weights = None
-        # self.grad_bias = None
-
         # momentum related
         self.velocity_weights = np.zeros_like(self.weights)
         self.velocity_bias = np.zeros_like(self.bias)
 
-    # TODO: During the forward pass, we simply compute XW+b
+    # During the forward pass, we simply compute XW+b
     def forward(self, input):
         self.input = input
         self.output = np.dot(input, self.weights) + self.bias
         return self.output
 
-    # TODO: Backward pass inputs:
-    #
+    # Backward pass inputs:
     # grad dL/dZ -- For a batch size of n, grad is a (n x output_dim) matrix where
     #         the i'th row is the gradient of the loss of example i with respect
     #         to z_i (the output of this layer for example i)
-
     def backward(self, labels):
         n = len(labels)
         # self.grad_weights dL/dW --  A (input_dim x output_dim) matrix storing the gradient
         #                       of the loss with respect to the weights of this layer.
         #                       This is an summation over the gradient of the loss of
         #                       each example with respect to the weights.
-        #
         self.grad_weights = np.dot(self.input.T, labels)
         assert self.grad_weights.shape == (self.input_dim, self.output_dim)
 
@@ -150,7 +124,6 @@ class LinearLayer:
         #                       This is an summation over the gradient of the loss of
         #                       each example with respect to the bias.
         self.grad_bias = np.sum(labels, axis=0, keepdims=True)
-        # self.grad_bias =
         assert self.grad_bias.shape == (1, self.output_dim)
 
         # Return Value:
@@ -160,7 +133,6 @@ class LinearLayer:
         #               to x_i (the input of this layer for example i)
         grad_input = np.dot(labels, self.weights.T)
         assert (grad_input.shape == (n, self.input_dim))
-        # assert grad_input.shape == (self.input_dim)
         return grad_input
 
     ######################################################
@@ -191,7 +163,7 @@ class LinearLayer:
 # Q4 Implement Evaluation for Monitoring Training
 ###################################################### 
 
-# TODO: Given a model, X/Y dataset, and batch size, return the average cross-entropy loss and accuracy over the set
+# Given a model, X/Y dataset, and batch size, return the average cross-entropy loss and accuracy over the set
 def evaluate(model, X_val, Y_val, batch_size):
     num_examples = X_val.shape[0]
     total_loss = 0
@@ -204,15 +176,12 @@ def evaluate(model, X_val, Y_val, batch_size):
         # Forward pass
         predictions = model.forward(inputs)
 
-
         # Compute loss
         loss = binary_cross_entropy_loss(predictions, labels)
-        total_loss += loss * inputs.shape[0]  # Multiply by batch size to account for averaging later
+        total_loss += loss * inputs.shape[0]
 
         # Compute accuracy
-        predicted_labels = np.argmax(predictions, axis=1)  # Assuming binary classification
         predicted_labels = (predictions > 0.5).astype(np.int8)
-        true_labels = np.argmax(labels, axis=1)  # Assuming one-hot encoding
         correct_predictions += np.sum(predicted_labels == labels)
 
     # Compute average loss and accuracy
@@ -248,6 +217,7 @@ def create_mini_batches(inputs, labels, batch_size):
 
     return batches
 
+
 def normalize_data(train_data, test_data):
     # convert to float first
     train_data = train_data.astype(float)
@@ -279,7 +249,6 @@ def binary_cross_entropy_loss(predictions, labels):
 
 def compute_loss_gradients(predictions, labels):
     # Compute gradients of binary cross-entropy loss with respect to predictions
-
     # Number of examples in the batch
     num_examples = predictions.shape[0]
 
@@ -293,19 +262,18 @@ def compute_loss_gradients(predictions, labels):
 
 
 def main(batch_size, step_size, hidden_units):
-    # TODO: Set optimization parameters (NEED TO SUPPLY THESE)
-    batch_size = 64  # TODO: lower? 32, 64
-    max_epochs = 20 # 300  # TODO: lower? 50, 100
-    step_size = 0.01
+    # batch_size = 64
+    max_epochs = 10
+    # step_size = 0.01
 
-    width_of_layers = hidden_units # [256, 64]
+    width_of_layers = hidden_units
     number_of_layers = len(hidden_units)
 
-    weight_decay = 0.01     # TODO:
+    weight_decay = 0.01
     momentum = 0.8
 
-    print(f"RUN TEST {batch_size=}, {step_size=}, {hidden_units=}")
-
+    if DEBUG:
+        print(f"RUN TEST {batch_size=}, {step_size=}, {hidden_units=}")
 
     # Load data
     data = pickle.load(open('cifar_2class_py3.p', 'rb'))
@@ -333,14 +301,13 @@ def main(batch_size, step_size, hidden_units):
 
     # training epoch loop
     for i in range(max_epochs):
-        print(f"Training loop #{i + 1}")
+        if DEBUG:
+            print(f"Training loop #{i + 1}")
         batches = create_mini_batches(X_train, Y_train, batch_size)
         train_losses = []
         for inputs, labels in batches:
             # Compute forward pass
             predictions = net.forward(inputs)
-            # print(f"{predictions=}")
-            # print(f"     {labels=}")
 
             # Compute loss
             loss = binary_cross_entropy_loss(predictions, labels)
@@ -355,7 +322,6 @@ def main(batch_size, step_size, hidden_units):
             net.step(step_size, momentum, weight_decay)
 
             # Book-keeping for loss / accuracy
-            # losses.append(loss)
             train_losses.append(loss)
 
         average_loss, accuracy = evaluate(net, inputs, labels, batch_size)
@@ -363,9 +329,8 @@ def main(batch_size, step_size, hidden_units):
         accs.append(accuracy)
 
 
-            # Evaluate performance on test.
+        # Evaluate performance on test.
         val_loss, vacc = evaluate(net, X_test, Y_test, batch_size)
-        # print(vacc)
         val_accs.append(vacc)
         val_losses.append(val_loss)
 
@@ -379,8 +344,8 @@ def main(batch_size, step_size, hidden_units):
         ###############################################################
         epoch_avg_loss = average_loss # np.mean(losses)
         epoch_avg_acc = np.mean(accs)
-        # losses.append(epoch_avg_loss)
-        logging.info("[Epoch {:3}]   Loss:  {:8.4}     Train Acc:  {:8.4}%      Val Acc:  {:8.4}%".format(i,epoch_avg_loss, epoch_avg_acc*100, vacc*100))
+        if DEBUG:
+            logging.info("[Epoch {:3}]   Loss:  {:8.4}     Train Acc:  {:8.4}%      Val Acc:  {:8.4}%".format(i,epoch_avg_loss, epoch_avg_acc*100, vacc*100))
 
     ###############################################################
     # Code for producing output plot requires
@@ -392,8 +357,10 @@ def main(batch_size, step_size, hidden_units):
     # batch_size -- the batch size
     ################################################################
 
-    if omit_single_plot:
-        return val_accs[-1]
+    if OMIT_SINGLE_PLOT:
+        best_acc = np.max(val_accs)                      # report the highest test accuracy
+        print(f"Trial: {batch_size=}, {step_size=}, {hidden_units=}, {best_acc=}")
+        return best_acc
     # Plot training and testing curves
     fig, ax1 = plt.subplots(figsize=(16, 9))
     color = 'tab:red'
@@ -423,13 +390,18 @@ def main(batch_size, step_size, hidden_units):
 # Define a function to run a single test
 def run_test(batch_size, learning_rate, hidden_units):
     # run the given config
-    return main(batch_size, learning_rate, hidden_units)
+    accs = []
+    for i in range(NUM_TRIALS):
+        accs.append(main(batch_size, learning_rate, hidden_units))
+    avg_acc = np.average(accs) * 100
+    print(f"AVG RESULT: {batch_size=}, {learning_rate=}, {hidden_units=}, {avg_acc}")
+    return avg_acc
 
 # Define a function to run tests with different batch sizes and generate plot
 def plot_batch_sizes(batch_sizes, learning_rate, hidden_units):
     results = []
     for batch_size in batch_sizes:
-        test_accuracy = run_test(batch_size, learning_rate, hidden_units) * 100
+        test_accuracy = run_test(batch_size, learning_rate, hidden_units)
         results.append((batch_size, test_accuracy))
 
     title = f'Test Accuracy vs. Batch Size (LR: {learning_rate}, Hidden Units: {hidden_units})'
@@ -441,7 +413,7 @@ def plot_batch_sizes(batch_sizes, learning_rate, hidden_units):
 def plot_learning_rates(batch_size, learning_rates, hidden_units):
     results = []
     for lr in learning_rates:
-        test_accuracy = run_test(batch_size, lr, hidden_units) * 100
+        test_accuracy = run_test(batch_size, lr, hidden_units)
         results.append((lr, test_accuracy))
 
     title = f'Test Accuracy vs. Learning Rate (Batch Size: {batch_size}, Hidden Units: {hidden_units})'
@@ -452,7 +424,7 @@ def plot_learning_rates(batch_size, learning_rates, hidden_units):
 def plot_hidden_units(batch_size, learning_rate, unit_cfgs):
     results = []
     for units in unit_cfgs[0]:
-        test_accuracy = run_test(batch_size, learning_rate, units) * 100
+        test_accuracy = run_test(batch_size, learning_rate, units)
         unit_str = ", ".join(str(i) for i in units)
         results.append((unit_str, test_accuracy))
 
@@ -473,25 +445,15 @@ def plot_results(results, title, xlabel, fname, font_size=None):
     plt.xlabel(xlabel)
     plt.title(title, fontsize=16)
     plt.grid(True)
-    plt.tight_layout()  # Adjust padding around the plot    # Rotate x-axis labels at 45 degrees
-    # Adjust bottom margin
-    # Set ticks equidistantly
+    plt.tight_layout()
+    # adjust xlabel for hidden units plots
     if font_size:
         num_ticks = len(x_values)
         plt.subplots_adjust(bottom=0.3)  # Increase bottom margin to 20%
         plt.xticks(rotation=-90)
         plt.xticks(range(num_ticks), x_values, fontsize=font_size)
-    # else:
-    #     plt.xticks(range(num_ticks), x_values)
-    # Custom tick labels
-    # custom_tick_labels = ['128', '64', '128, 64', '256, 128, 64', '512, 256, 128, 64']
-
-    # Set ticks equidistantly with custom tick labels
-    # num_ticks = len(custom_tick_labels)
-    # plt.xticks(range(num_ticks), custom_tick_labels)
 
     plt.savefig(fname)
-    # plt.show()
     print(f"Generated {fname}")
 
 
@@ -515,23 +477,7 @@ class FeedForwardNeuralNetwork:
             ])
 
         self.layers.append(LinearLayer(hidden_dims[-1], output_dim))
-
-        # TODO: ask Pat about sigmoid requiring labels (
         # layers produce logits (any number), sigmoid reduces those to probs [0,1)
-
-        # self.layers.append(
-        #     SigmoidCrossEntropy()
-        # )
-        #
-        # if num_layers == 1:
-        #     self.layers = [LinearLayer(input_dim, output_dim)]
-        # else:
-        #     self.layers = [
-        #         LinearLayer(input_dim, hidden_dim),
-        #         ReLU(hidden_dim, output_dim),
-        #         SigmoidCrossEntropy(output_dim, 1)
-        #     ]
-        # TODO: Please create a network with hidden layers based on the parameters
 
     def forward(self, X):
         for layer in self.layers:
@@ -556,33 +502,51 @@ def displayExample(x):
     plt.axis('off')
     plt.show()
 
+# Define a function to execute each plot function
+def execute_plot_function(plot_function, *args):
+    plot_function(*args)
+
 
 if __name__ == "__main__":
-    # main()
-    # if True:
-    #     exit(1)
-
     # Define batch sizes, learning rates, and number of hidden units
-    best_batch = 64
-    best_lr = 0.1
-    best_hidden_units = [256, 128, 64]
+    best_batch = 512
+    best_lr = 0.01
+    best_hidden_units = [128, 64]
 
 
-    batch_sizes = [16, 32, 64, 128, 256, 512]
-    learning_rates = [0.001, 0.01, 0.1]
-
-    # Plot test accuracy vs. batch sizes
-    plot_batch_sizes(batch_sizes, best_lr, best_hidden_units)
-
-    # Plot test accuracy vs. learning rates
-    plot_learning_rates(best_batch, learning_rates, best_hidden_units)
-
-    # Plot test accuracy vs. learning rates
+    batch_sizes = [16, 32, 64, 128, 256, 512, 1024]
+    learning_rates = [0.0001, 0.001, 0.01, 0.1, 0.5]
     hidden_units_cfgs = [
-        [128],
         [64],
+        [128],
         [128, 64],
+        [512, 64],
+        [1024, 256],
         [256, 128, 64],
+        [1024, 128, 64],
         [512, 256, 128, 64],
-        ],
-    plot_hidden_units(best_batch, best_lr, hidden_units_cfgs)
+        [1024, 512, 256, 128, 64],
+    ],
+
+    if RUN_PARALLEL:
+        # Create a pool of processes
+        pool = multiprocessing.Pool(processes=3)
+
+        # Submit each plot function to the pool for parallel execution
+        pool.apply_async(execute_plot_function, (plot_batch_sizes, batch_sizes, best_lr, best_hidden_units))
+        pool.apply_async(execute_plot_function, (plot_learning_rates, best_batch, learning_rates, best_hidden_units))
+        pool.apply_async(execute_plot_function, (plot_hidden_units, best_batch, best_lr, hidden_units_cfgs))
+
+        # Close the pool and wait for all processes to complete
+        pool.close()
+        pool.join()
+    else:
+        # Plot test accuracy vs. batch sizes
+        plot_batch_sizes(batch_sizes, best_lr, best_hidden_units)
+
+        # Plot test accuracy vs. learning rates
+        plot_learning_rates(best_batch, learning_rates, best_hidden_units)
+
+        # Plot test accuracy vs. learning rates
+        plot_hidden_units(best_batch, best_lr, hidden_units_cfgs)
+
