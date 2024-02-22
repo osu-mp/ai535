@@ -1,7 +1,7 @@
 """
 Matthew Pacey
 AI 535 - HW2
-Neural Nets and Backpropagation
+CIFAR Image Classification using Fully-Connected Network
 """
 import numpy as np
 import pickle
@@ -23,6 +23,7 @@ logging.basicConfig(
 batch_plot = "batches.png"
 learn_plot = "learning_rate.png"
 hidden_plot = "hidden_plot.png"
+
 NUM_TRIALS = 10                     # run this many trials per config and take average test accuracy
 OMIT_SINGLE_PLOT = True             # for each config, just return highest test acc, do not plot individual run
 RUN_PARALLEL = True                 # run trials of batch size, learning rates, and hidden unit configs in parallel
@@ -34,7 +35,6 @@ DEBUG = False                       # turn on to display debug prints
 
 
 class SigmoidCrossEntropy:
-
     # Compute the cross entropy loss after sigmoid. The reason they are put into the same layer is because the gradient has a simpler form
     # logits -- batch_size x num_classes set of scores, logits[i,j] is score of class j for batch element i
     # labels -- batch_size x 1 vector of integer label id (0,1,2) where labels[i] is the label for batch element i
@@ -53,7 +53,6 @@ class SigmoidCrossEntropy:
         assert self.output >= 0, "output should be a positive scalar"
         return self.output
 
-
     # Compute the gradient of the cross entropy loss with respect to the the input logits
     def backward(self):
         # use forward pass stored results
@@ -63,7 +62,6 @@ class SigmoidCrossEntropy:
 
 
 class ReLU():
-
     # Compute ReLU(input) element-wise
     def forward(self, input):
         self.input = input
@@ -81,7 +79,6 @@ class ReLU():
 
 
 class LinearLayer:
-
     # Initialize our layer with (input_dim, output_dim) weight matrix and a (1,output_dim) bias vector
     def __init__(self, input_dim, output_dim):
         # save dimensions
@@ -509,10 +506,9 @@ def execute_plot_function(plot_function, *args):
 
 if __name__ == "__main__":
     # Define batch sizes, learning rates, and number of hidden units
-    best_batch = 512
+    best_batch = 64
     best_lr = 0.01
     best_hidden_units = [128, 64]
-
 
     batch_sizes = [16, 32, 64, 128, 256, 512, 1024]
     learning_rates = [0.0001, 0.001, 0.01, 0.1, 0.5]
